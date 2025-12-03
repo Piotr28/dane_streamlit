@@ -118,7 +118,7 @@ module = st.sidebar.radio(
 
     "Wybierz moduł:", 
 
-    options=["Analiza jakości wina", "Parowanie wina z jedzeniem"] 
+    options=["Analiza jakości wina", "Parowanie wina z jedzeniem", "Nowa wizualizacja i model LightGBM"] 
 
 ) 
 
@@ -813,3 +813,121 @@ elif module == "Parowanie wina z jedzeniem":
     else: 
 
         st.info("Wpisz fragment nazwy dania, aby zobaczyć rekomendacje.") 
+
+elif module == "Nowa wizualizacja i model LightGBM":
+
+    import lightgbm as lgb
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
+
+    st.title("Zaawansowana analiza danych + model LightGBM")
+
+    # 1. Wczytanie danych
+    data = pd.read_csv("winequality-red.csv")
+    st.subheader("Podgląd danych")
+    st.dataframe(data.head())
+
+    # 2. Konwersja jakości na 3 klasy
+    def map_quality(q):
+        if q <= 4:
+            return 0
+        elif q <= 6:
+            return 1
+        else:
+            return 2
+
+    data["quality_class"] = data["quality"].apply(map_quality)
+    st.write("### Modyfikacja jakości na 3 klasy (0=słabe,1=średnie,2=dobre)")
+    st.dataframe(data[["quality", "quality_class"]].head())
+
+    # 3. EDA
+    st.header("Wizualizacje danych")
+
+    # Heatmap
+    st.subheader("Heatmap korelacji")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.heatmap(data.corr(), cmap="coolwarm", annot=False)
+    st.pyplot(fig)
+
+    # Histogram
+    st.subheader("Histogram wybranej cechy")
+    col = st.selectbox("Wybierz cechę:", data.columns[:-2])
+    fig2, ax2 = plt.subplots()
+    sns.histplot(data[col], kde=True)
+    st.pyplot(fig2)
+
+    # Boxplot
+    st.subheader("Boxplot: jakość a wybrana cecha")
+    col2 = st.selectbox("Wybierz cechę do porównania:", data.columns[:-2])
+    fig3, ax3 = plt.subplots()
+    sns.boxplot(x=data["quality_class"], y=data[col2])
+    st.pyplot(fig3)
+
+    # 4. Trenowanie modelu LightGBM
+    st.header("Model LightGBM — klasyfikacja jakości")
+
+    X = data.drop(["quality", "quality_class"], axis=1)
+    y = data["quality_class"]
+
+    # Skalowanie
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Podział danych
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42
+    )
+
+    # Model LightGBM
+    model = lgb.LGBMClassifier(
+        num_leaves=31,
+        learning_rate=0.05,
+        n_estimators=500
+    )
+
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+    # 5. Wyniki
+    st.subheader("Wyniki modelu")
+
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average='weighted')
+
+    st.write(f"**Accuracy:** {acc:.4f}")
+    st.write(f"**F1-score:** {f1:.4f}")
+
+    st.write("Raport klasyfikacji:")
+    st.text(classification_report(y_test, y_pred))
+
+    # Macierz pomyłek
+    st.subheader("Macierz pomyłek")
+    cm = confusion_matrix(y_test, y_pred)
+    labels = ["słabe", "średnie", "dobre"]
+    fig4, ax4 = plt.subplots()
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=labels, yticklabels=labels)
+    ax4.set_xlabel("Przewidziana klasa")
+    ax4.set_ylabel("Rzeczywista klasa")
+    st.pyplot(fig4)
+
+    # 6. Formularz
+    st.header("Predykcja jakości wina (LightGBM)")
+
+    st.write("Wprowadź parametry wina:")
+
+    inputs = []
+    for c in X.columns:
+        val = st.number_input(c, float(data[c].min()), float(data[c].max()), float(data[c].mean()))
+        inputs.append(val)
+
+    if st.button("Przewiduj jakość"):
+        arr = np.array(inputs).reshape(1, -1)
+        arr_scaled = scaler.transform(arr)
+        pred = model.predict(arr_scaled)[0]
+
+        if pred == 0:
+            st.success("➡ Wynik: **SŁABE wino** (klasa 0)")
+        elif pred == 1:
+            st.success("➡ Wynik: **ŚREDNIE wino** (klasa 1)")
+        else:
+            st.success("➡ Wynik: **DOBRE wino** (klasa 2)")
